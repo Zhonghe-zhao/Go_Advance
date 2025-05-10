@@ -3,17 +3,25 @@ package main
 import (
 	"fmt"
 	"sync"
-	"time"
+	"sync/atomic"
 )
 
-func producer(id int, ch chan<- int, wg *sync.WaitGroup) {
+func producer(id int, ch chan<- int, wg *sync.WaitGroup, total *int32) {
 	defer wg.Done()
-	for i := 0; i < 5; i++ {
-		val := id*10 + 1
-		fmt.Println("生产者:", id, "生产:", val)
-		ch <- val
-		time.Sleep(time.Second)
+	for {
+		current := atomic.LoadInt32(total)
+		if current >= 100 {
+			return
+		}
+		newVal := atomic.AddInt32(total, 1)
+		if newVal > 100 {
+			return
+		}
+		fmt.Println("生产者:", id, "生产:", newVal)
+		ch <- int(newVal)
+
 	}
+
 	//close(ch) 不能让每个生产者都能关闭通道 而是要统一关闭
 
 }
@@ -26,19 +34,15 @@ func consumer(id int, ch <-chan int, wg *sync.WaitGroup) {
 }
 
 func main() {
+	var counter int32
 	ch := make(chan int)
 	var wgPro sync.WaitGroup
 	var wgCon sync.WaitGroup
 
-	wgPro.Add(2)
+	wgPro.Add(3)
 	// 28-31行的数据顺序也会导致不同的结果 对于没有 go 启动的生产者来说，生产者执行的是一个阻塞操作，它会依次执行以下步骤
-	for a := 1; a <= 2; a++ {
-		go producer(a, ch, &wgPro)
-	}
-
-	wgCon.Add(3)
-	for i := 1; i <= 3; i++ {
-		go consumer(i, ch, &wgCon)
+	for a := 1; a <= 3; a++ {
+		go producer(a, ch, &wgPro, &counter)
 	}
 
 	//统一处理通道关闭
@@ -46,6 +50,11 @@ func main() {
 		wgPro.Wait()
 		close(ch)
 	}()
+
+	wgCon.Add(5)
+	for i := 1; i <= 5; i++ {
+		go consumer(i, ch, &wgCon)
+	}
 
 	wgCon.Wait() //等待所有消费者处理完
 }
